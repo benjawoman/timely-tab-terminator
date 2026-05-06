@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tab Cleaner</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <strong>Tab Cleaner</strong>
+    <div class="header-right">
+      <button id="themeToggle" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+      <label class="switch">
+        <input type="checkbox" id="enabled" />
+        <span>On</span>
+      </label>
+    </div>
+  </header>
+
+  <section class="card" aria-label="Current tab">
+    <div class="row-flex">
+      <span class="host" id="currentTabHost" title="">—</span>
+      <button id="addToWhitelist" class="link-btn" title="Add this site to the whitelist">+ whitelist</button>
+    </div>
+    <div class="meta" id="currentTabAge">—</div>
+  </section>
+
+  <section class="settings" aria-label="Cleanup settings">
+    <div class="setting-row">
+      <label for="maxAge">Idle limit</label>
+      <div class="num-wrap">
+        <input type="number" id="maxAge" min="1" step="1" />
+        <span class="unit">min</span>
+      </div>
+    </div>
+    <div class="setting-row">
+      <label for="threshold" title="Set to 0 to close all idle tabs with no minimum">Keep at least</label>
+      <div class="num-wrap">
+        <input type="number" id="threshold" min="0" step="1" />
+        <span class="unit">tabs</span>
+      </div>
+    </div>
+    <div class="check-row">
+      <label class="check"><input type="checkbox" id="closePinned" /> Pinned</label>
+      <label class="check"><input type="checkbox" id="closeAudible" /> Audible</label>
+    </div>
+  </section>
+
+  <section aria-label="Open tabs">
+    <div class="section-head">
+      <span>Open tabs</span>
+      <span class="muted" id="tabCount">0</span>
+    </div>
+    <ul class="tab-list" id="tabList"></ul>
+  </section>
+
+  <section aria-label="Whitelist">
+    <label for="whitelist" class="section-head"><span>Whitelist</span></label>
+    <textarea id="whitelist" rows="3" placeholder="example.com&#10;app.example.com"></textarea>
+  </section>
+
+  <div class="hard-age-row">
+    <label class="check hard-age-label">
+      <input type="checkbox" id="hardMaxAgeEnabled" />
+      <span>On Run Now, also close idle</span>
+    </label>
+    <div class="num-wrap">
+      <input type="number" id="hardMaxAge" min="1" step="1" />
+      <span class="unit">min</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button id="save" class="primary">Save</button>
+    <button id="sweep">Run now</button>
+  </div>
+
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

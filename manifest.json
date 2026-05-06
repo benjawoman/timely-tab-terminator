@@ -1,0 +1,29 @@
+{
+  "manifest_version": 2,
+  "name": "Tab Cleaner",
+  "version": "1.0.0",
+  "description": "Close tabs that have been idle for too long, with a whitelist and a tab-count threshold.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "tab-cleaner@yourname",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"],
+        "optional": []
+      }
+    }
+  },
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+  "browser_action": {
+    "default_title": "Tab Cleaner",
+    "default_popup": "popup.html"
+  }
+}
