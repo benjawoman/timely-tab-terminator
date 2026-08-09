@@ -2,17 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Tab Cleaner</title>
+  <title>Timely Tab Cleaner</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <header>
-    <strong>Tab Cleaner</strong>
+    <strong title="Timely Tab Cleaner">TTT</strong>
     <div class="header-right">
       <button id="themeToggle" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
       <label class="switch">
         <input type="checkbox" id="enabled" />
-        <span>On</span>
+        <span>Enabled</span>
       </label>
     </div>
   </header>
@@ -41,8 +41,8 @@
       </div>
     </div>
     <div class="check-row">
-      <label class="check"><input type="checkbox" id="closePinned" /> Pinned</label>
-      <label class="check"><input type="checkbox" id="closeAudible" /> Audible</label>
+      <label class="check" title="When checked, pinned tabs can be closed"><input type="checkbox" id="closePinned" /> Pinned</label>
+      <label class="check" title="When checked, tabs playing audio can be closed"><input type="checkbox" id="closeAudible" /> Audible</label>
     </div>
   </section>
 
@@ -52,6 +52,14 @@
       <span class="muted" id="tabCount">0</span>
     </div>
     <ul class="tab-list" id="tabList"></ul>
+  </section>
+
+  <section aria-label="Tab groups">
+    <div class="section-head">
+      <span>Tab groups</span>
+      <span class="muted" id="groupCount">0</span>
+    </div>
+    <div id="groupList" class="group-list"></div>
   </section>
 
   <section aria-label="Whitelist">
@@ -77,6 +85,7 @@
 
   <div id="status" class="status" role="status" aria-live="polite"></div>
 
+  <script src="utils.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

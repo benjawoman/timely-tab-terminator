@@ -6,8 +6,20 @@ const DEFAULTS = {
   closePinned: false,
   closeAudible: false,
   hardMaxAgeEnabled: false,
-  hardMaxAgeMinutes: 120,
+  hardMaxAgeMinutes: 10,
   theme: "light"
+};
+
+const GROUP_COLORS = {
+  blue: "#1c71d8",
+  purple: "#9141ac",
+  cyan: "#0c8c8c",
+  green: "#26a269",
+  yellow: "#c89800",
+  orange: "#e66100",
+  red: "#e01b24",
+  pink: "#c061cb",
+  grey: "#77767b"
 };
 
 function applyTheme(dark) {
@@ -16,24 +28,6 @@ function applyTheme(dark) {
 }
 
 const $ = (id) => document.getElementById(id);
-
-function hostnameOf(url) {
-  try { return new URL(url).hostname; } catch { return ""; }
-}
-
-function formatDuration(ms) {
-  if (ms == null || ms < 0) return "—";
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return "<1m";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  const rmin = min % 60;
-  if (hr < 24) return rmin > 0 ? `${hr}h ${rmin}m` : `${hr}h`;
-  const day = Math.floor(hr / 24);
-  const rhr = hr % 24;
-  return rhr > 0 ? `${day}d ${rhr}h` : `${day}d`;
-}
 
 function parseWhitelist(text) {
   return text.split(/\r?\n/).map((l) => l.trim().toLowerCase()).filter(Boolean);
@@ -89,6 +83,7 @@ function renderTabList(tabs, state, whitelist) {
     if (tab.active) li.classList.add("active-tab");
     const host = hostnameOf(tab.url);
     if (isWhitelisted(host, whitelist)) li.classList.add("whitelisted");
+    if (tab.groupId != null && tab.groupId !== -1) li.classList.add("grouped-tab");
 
     const hostEl = document.createElement("span");
     hostEl.className = "tab-host";
@@ -102,6 +97,101 @@ function renderTabList(tabs, state, whitelist) {
     li.appendChild(hostEl);
     li.appendChild(ageEl);
     list.appendChild(li);
+  }
+}
+
+function renderGroupList(tabs, groups, state) {
+  const container = $("groupList");
+  container.innerHTML = "";
+
+  const groupedTabs = tabs.filter((t) => t.groupId != null && t.groupId !== -1);
+  if (groupedTabs.length === 0) {
+    $("groupCount").textContent = "0";
+    const empty = document.createElement("p");
+    empty.className = "group-empty";
+    empty.textContent = "No tab groups";
+    container.appendChild(empty);
+    return;
+  }
+
+  const groupById = new Map(groups.map((g) => [g.id, g]));
+  const buckets = new Map();
+
+  for (const tab of groupedTabs) {
+    const list = buckets.get(tab.groupId) || [];
+    list.push(tab);
+    buckets.set(tab.groupId, list);
+  }
+
+  const now = Date.now();
+  const entries = [...buckets.entries()].map(([groupId, groupTabs]) => {
+    const meta = groupById.get(groupId);
+    return {
+      groupId,
+      title: meta?.title || "Untitled group",
+      color: meta?.color || "grey",
+      tabs: groupTabs.sort((a, b) => {
+        const aOpen = now - (state.createdAt[a.id] || now);
+        const bOpen = now - (state.createdAt[b.id] || now);
+        return bOpen - aOpen;
+      })
+    };
+  });
+
+  entries.sort((a, b) => a.title.localeCompare(b.title));
+  $("groupCount").textContent = `${entries.length}`;
+
+  for (const entry of entries) {
+    const details = document.createElement("details");
+    details.className = "group-item";
+
+    const summary = document.createElement("summary");
+    summary.className = "group-summary";
+
+    const swatch = document.createElement("span");
+    swatch.className = "group-swatch";
+    swatch.style.backgroundColor = GROUP_COLORS[entry.color] || GROUP_COLORS.grey;
+    swatch.setAttribute("aria-hidden", "true");
+
+    const title = document.createElement("span");
+    title.className = "group-title";
+    title.textContent = entry.title;
+
+    const count = document.createElement("span");
+    count.className = "group-count";
+    count.textContent = `${entry.tabs.length}`;
+
+    summary.appendChild(swatch);
+    summary.appendChild(title);
+    summary.appendChild(count);
+    details.appendChild(summary);
+
+    const tabList = document.createElement("ul");
+    tabList.className = "group-tab-list";
+
+    for (const tab of entry.tabs) {
+      const li = document.createElement("li");
+      const host = hostnameOf(tab.url);
+
+      const hostEl = document.createElement("span");
+      hostEl.className = "tab-host";
+      hostEl.textContent = host || tab.title || tab.url || "(blank)";
+      hostEl.title = tab.title ? `${tab.title}\n${tab.url || ""}` : tab.url || "";
+
+      const ageEl = document.createElement("span");
+      ageEl.className = "tab-age";
+      const created = state.createdAt[tab.id];
+      ageEl.textContent = created
+        ? formatDuration(now - created)
+        : "recent";
+
+      li.appendChild(hostEl);
+      li.appendChild(ageEl);
+      tabList.appendChild(li);
+    }
+
+    details.appendChild(tabList);
+    container.appendChild(details);
   }
 }
 
@@ -121,10 +211,12 @@ async function load() {
 
   const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
   const allTabs = await browser.tabs.query({});
+  const groups = await browser.tabGroups.query({});
   const state = await browser.runtime.sendMessage({ type: "getTabsState" });
 
   if (activeTab) renderCurrentTab(activeTab, state);
   renderTabList(allTabs, state, s.whitelist || []);
+  renderGroupList(allTabs, groups, state);
 }
 
 async function save() {
@@ -143,10 +235,11 @@ async function save() {
     hardMaxAgeMinutes,
     whitelist
   });
-  // Re-render list so whitelist stars update without reopening the popup.
   const allTabs = await browser.tabs.query({});
+  const groups = await browser.tabGroups.query({});
   const state = await browser.runtime.sendMessage({ type: "getTabsState" });
   renderTabList(allTabs, state, whitelist);
+  renderGroupList(allTabs, groups, state);
   flash("Saved");
 }
 
@@ -155,8 +248,10 @@ async function sweepNow() {
   try {
     await browser.runtime.sendMessage({ type: "runSweepNow" });
     const allTabs = await browser.tabs.query({});
+    const groups = await browser.tabGroups.query({});
     const state = await browser.runtime.sendMessage({ type: "getTabsState" });
     renderTabList(allTabs, state, parseWhitelist($("whitelist").value));
+    renderGroupList(allTabs, groups, state);
     flash("Cleanup run");
   } catch (e) {
     flash("Cleanup failed", true);

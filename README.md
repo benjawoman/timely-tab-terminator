@@ -1,4 +1,4 @@
-# Tab Cleaner
+# Timely Tab Cleaner (TTT)
 
 A Firefox extension that automatically closes idle tabs to keep your browser clean, with a whitelist, tab-count threshold, and dark/light mode.
 
@@ -12,12 +12,13 @@ A Firefox extension that automatically closes idle tabs to keep your browser cle
 - **Open tab list** — scrollable list of all tabs sorted by idle time, with whitelisted tabs marked ★
 - **Pinned & audible tab protection** — optionally include or exclude pinned tabs and tabs playing audio
 - **Dark / light mode** — toggle with the 🌙 / ☀️ button; preference is saved
+- **Support for Tab Groups** *(New!)* — tabs in a tab group are never closed automatically. A collapsible groups section in the popup lets you view each group and how long its tabs have been open.
 
 ## Installation
 
 ### From Firefox Add-ons (AMO)
 
-Search for **Tab Cleaner** on [addons.mozilla.org](https://addons.mozilla.org) or install directly from the listing page.
+Search for **Timely Tab Cleaner** on [addons.mozilla.org](https://addons.mozilla.org) or install directly from the listing page.
 
 ### Manual (temporary, for development)
 
@@ -32,7 +33,7 @@ Temporary installs are removed when Firefox closes. For a persistent install, us
 
 | Setting | Description |
 |---|---|
-| **On / Off** | Enable or disable all automatic cleanup |
+| **Enabled** | Enable or disable all automatic cleanup |
 | **Idle limit** | Minutes a tab must be idle before it's eligible for cleanup |
 | **Keep at least** | Minimum number of tabs to keep open; set to `0` for no floor |
 | **Pinned** | If checked, pinned tabs are eligible for cleanup |
@@ -42,7 +43,7 @@ Temporary installs are removed when Firefox closes. For a persistent install, us
 
 ## Privacy
 
-Tab Cleaner collects no user data. All information (tab timestamps, settings, whitelist) is stored locally in `browser.storage.local` and never transmitted anywhere. No analytics, no external requests.
+Timely Tab Cleaner collects no user data. All information (tab timestamps, settings, whitelist) is stored locally in `browser.storage.local` and never transmitted anywhere. No analytics, no external requests.
 
 ## Requirements
 

@@ -6,7 +6,7 @@ const DEFAULTS = {
   closePinned: false,
   closeAudible: false,
   hardMaxAgeEnabled: false,
-  hardMaxAgeMinutes: 120
+  hardMaxAgeMinutes: 10
 };
 
 const ALARM_NAME = "tab-cleaner-sweep";
@@ -33,14 +33,6 @@ async function getSettings() {
 
 function nowMs() {
   return Date.now();
-}
-
-function hostnameOf(url) {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "";
-  }
 }
 
 function isWhitelisted(url, whitelist) {
@@ -86,6 +78,7 @@ function buildExcluder(settings, activeByWindow) {
     if (activeByWindow.has(`${tab.windowId}:${tab.id}`)) return true;
     if (!settings.closePinned && tab.pinned) return true;
     if (!settings.closeAudible && tab.audible) return true;
+    if (tab.groupId != null && tab.groupId !== -1) return true;
     if (isWhitelisted(tab.url, settings.whitelist)) return true;
     return false;
   };
@@ -96,7 +89,7 @@ async function removeTabs(ids) {
   try {
     await browser.tabs.remove([...ids]);
   } catch (e) {
-    console.error("Tab Cleaner: tabs.remove failed", e);
+    console.error("Timely Tab Cleaner: tabs.remove failed", e);
   }
   for (const id of ids) {
     delete lastActive[id];
