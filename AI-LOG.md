@@ -19,7 +19,8 @@ This document serves as a transparent record of all AI-assisted code modificatio
 
 ### Version 2.0.0 | Internal Version 3
 **Date:** 2024
-**Model:** [Current Session Model]
+**Model:** GPT-4
+**Client** Qwen Code (Web)
 **Summary of Changes:**
 - Created this AI-LOG documentation file for transparency tracking.
 - **Performance Optimization**: Implemented debounced state saving (500ms delay) in `background.js` to reduce storage I/O operations.
