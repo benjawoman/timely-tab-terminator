@@ -29,14 +29,14 @@
     <div class="setting-row">
       <label for="maxAge">Idle limit</label>
       <div class="num-wrap">
-        <input type="number" id="maxAge" min="1" step="1" />
+        <input type="number" id="maxAge" min="1" step="1" aria-label="Maximum idle time in minutes" />
         <span class="unit">min</span>
       </div>
     </div>
     <div class="setting-row">
       <label for="threshold" title="Set to 0 to close all idle tabs with no minimum">Keep at least</label>
       <div class="num-wrap">
-        <input type="number" id="threshold" min="0" step="1" />
+        <input type="number" id="threshold" min="0" step="1" aria-label="Minimum number of tabs to keep" />
         <span class="unit">tabs</span>
       </div>
     </div>
@@ -73,14 +73,14 @@
       <span>On Run Now, also close idle</span>
     </label>
     <div class="num-wrap">
-      <input type="number" id="hardMaxAge" min="1" step="1" />
+      <input type="number" id="hardMaxAge" min="1" step="1" aria-label="Hard max age in minutes" />
       <span class="unit">min</span>
     </div>
   </div>
 
   <div class="footer">
-    <button id="save" class="primary">Save</button>
-    <button id="sweep">Run now</button>
+    <button id="save" class="primary" aria-label="Save settings">Save</button>
+    <button id="sweep" aria-label="Run cleanup now">Run now</button>
   </div>
 
   <div id="status" class="status" role="status" aria-live="polite"></div>
