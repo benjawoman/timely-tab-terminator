@@ -6,11 +6,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "tab-cleaner@yourname",
-      "strict_min_version": "140.0",
-      "data_collection_permissions": {
-        "required": ["none"],
-        "optional": []
-      }
+      "strict_min_version": "140.0"
     }
   },
   "permissions": [
