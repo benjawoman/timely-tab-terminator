@@ -29,8 +29,30 @@ function applyTheme(dark) {
 
 const $ = (id) => document.getElementById(id);
 
+// Cache DOM elements to avoid repeated queries
+const elements = {};
+function cacheElements() {
+  elements.currentTabHost = $("currentTabHost");
+  elements.currentTabAge = $("currentTabAge");
+  elements.addToWhitelist = $("addToWhitelist");
+  elements.tabCount = $("tabCount");
+  elements.tabList = $("tabList");
+  elements.groupList = $("groupList");
+  elements.groupCount = $("groupCount");
+  elements.status = $("status");
+  elements.saveBtn = $("save");
+  elements.sweepBtn = $("sweep");
+}
+
 function parseWhitelist(text) {
   return text.split(/\r?\n/).map((l) => l.trim().toLowerCase()).filter(Boolean);
+}
+
+function flash(msg, isError = false) {
+  const el = elements.status;
+  el.textContent = msg;
+  el.style.color = isError ? "#c4292c" : "#1d8b3a";
+  setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 2000);
 }
 
 function isWhitelisted(host, whitelist) {
@@ -39,32 +61,25 @@ function isWhitelisted(host, whitelist) {
   return whitelist.some((e) => h === e || h.endsWith("." + e));
 }
 
-function flash(msg, isError = false) {
-  const el = $("status");
-  el.textContent = msg;
-  el.style.color = isError ? "#c4292c" : "#1d8b3a";
-  setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 2000);
-}
-
 function renderCurrentTab(tab, state) {
   const host = hostnameOf(tab.url);
-  const hostEl = $("currentTabHost");
+  const hostEl = elements.currentTabHost;
   hostEl.textContent = host || tab.title || tab.url || "—";
   hostEl.title = tab.url || "";
 
   const created = state.createdAt[tab.id];
-  $("currentTabAge").textContent = created
+  elements.currentTabAge.textContent = created
     ? `Opened ${formatDuration(Date.now() - created)} ago`
     : "Opened recently";
 
-  const addBtn = $("addToWhitelist");
+  const addBtn = elements.addToWhitelist;
   addBtn.disabled = !host;
   addBtn.title = host ? `Add ${host} to the whitelist` : "Cannot whitelist this page type";
 }
 
 function renderTabList(tabs, state, whitelist) {
-  $("tabCount").textContent = `${tabs.length} open`;
-  const list = $("tabList");
+  elements.tabCount.textContent = `${tabs.length} open`;
+  const list = elements.tabList;
   list.innerHTML = "";
 
   const now = Date.now();
@@ -101,12 +116,12 @@ function renderTabList(tabs, state, whitelist) {
 }
 
 function renderGroupList(tabs, groups, state) {
-  const container = $("groupList");
+  const container = elements.groupList;
   container.innerHTML = "";
 
   const groupedTabs = tabs.filter((t) => t.groupId != null && t.groupId !== -1);
   if (groupedTabs.length === 0) {
-    $("groupCount").textContent = "0";
+    elements.groupCount.textContent = "0";
     const empty = document.createElement("p");
     empty.className = "group-empty";
     empty.textContent = "No tab groups";
@@ -139,7 +154,7 @@ function renderGroupList(tabs, groups, state) {
   });
 
   entries.sort((a, b) => a.title.localeCompare(b.title));
-  $("groupCount").textContent = `${entries.length}`;
+  elements.groupCount.textContent = `${entries.length}`;
 
   for (const entry of entries) {
     const details = document.createElement("details");
@@ -209,6 +224,8 @@ async function load() {
   $("hardMaxAge").disabled = !s.hardMaxAgeEnabled;
   $("whitelist").value = (s.whitelist || []).join("\n");
 
+  cacheElements();
+
   const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
   const allTabs = await browser.tabs.query({});
   const groups = await browser.tabGroups.query({});
@@ -225,28 +242,62 @@ async function save() {
   const hardMaxAgeEnabled = $("hardMaxAgeEnabled").checked;
   const hardMaxAgeMinutes = Math.max(1, parseInt($("hardMaxAge").value, 10) || DEFAULTS.hardMaxAgeMinutes);
   const whitelist = parseWhitelist($("whitelist").value);
-  await browser.storage.local.set({
-    enabled: $("enabled").checked,
-    maxAgeMinutes: maxAge,
-    tabThreshold: threshold,
-    closePinned: $("closePinned").checked,
-    closeAudible: $("closeAudible").checked,
-    hardMaxAgeEnabled,
-    hardMaxAgeMinutes,
-    whitelist
-  });
-  const allTabs = await browser.tabs.query({});
-  const groups = await browser.tabGroups.query({});
-  const state = await browser.runtime.sendMessage({ type: "getTabsState" });
-  renderTabList(allTabs, state, whitelist);
-  renderGroupList(allTabs, groups, state);
-  flash("Saved");
+  
+  elements.saveBtn.disabled = true;
+  elements.saveBtn.textContent = "Saving...";
+  
+  try {
+    await browser.storage.local.set({
+      enabled: $("enabled").checked,
+      maxAgeMinutes: maxAge,
+      tabThreshold: threshold,
+      closePinned: $("closePinned").checked,
+      closeAudible: $("closeAudible").checked,
+      hardMaxAgeEnabled,
+      hardMaxAgeMinutes,
+      whitelist
+    });
+    const allTabs = await browser.tabs.query({});
+    const groups = await browser.tabGroups.query({});
+    const state = await browser.runtime.sendMessage({ type: "getTabsState" });
+    renderTabList(allTabs, state, whitelist);
+    renderGroupList(allTabs, groups, state);
+    flash("Saved");
+  } catch (e) {
+    flash(`Save failed: ${e.message}`, true);
+  } finally {
+    elements.saveBtn.disabled = false;
+    elements.saveBtn.textContent = "Save";
+  }
 }
 
 async function sweepNow() {
-  await save();
+  elements.sweepBtn.disabled = true;
+  elements.sweepBtn.textContent = "Running...";
+  
   try {
-    await browser.runtime.sendMessage({ type: "runSweepNow" });
+    await save();
+    const result = await browser.runtime.sendMessage({ type: "runSweepNow" });
+    
+    // Handle confirmation request
+    if (result && result.needsConfirmation) {
+      const confirmed = confirm(
+        `About to close ${result.count} of ${result.total} tabs.\n\n` +
+        `This is ${(result.count / result.total * 100).toFixed(0)}% of your open tabs.\n\n` +
+        `Do you want to proceed?`
+      );
+      
+      if (!confirmed) {
+        elements.sweepBtn.disabled = false;
+        elements.sweepBtn.textContent = "Run now";
+        flash("Cleanup cancelled");
+        return;
+      }
+      
+      // User confirmed, run the cleanup
+      await browser.runtime.sendMessage({ type: "confirmAndRunSweep" });
+    }
+    
     const allTabs = await browser.tabs.query({});
     const groups = await browser.tabGroups.query({});
     const state = await browser.runtime.sendMessage({ type: "getTabsState" });
@@ -254,7 +305,10 @@ async function sweepNow() {
     renderGroupList(allTabs, groups, state);
     flash("Cleanup run");
   } catch (e) {
-    flash("Cleanup failed", true);
+    flash(`Cleanup failed: ${e.message}`, true);
+  } finally {
+    elements.sweepBtn.disabled = false;
+    elements.sweepBtn.textContent = "Run now";
   }
 }
 
