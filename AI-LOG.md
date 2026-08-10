@@ -34,4 +34,29 @@ This document serves as a transparent record of all AI-assisted code modificatio
 
 ---
 
+### Version 2.0.0 | Internal Version 4
+**Date:** 2026-08-09
+**Model:** Gemini 3.6 Flash
+**Client:** Antigravity CLI
+**Summary of Changes:**
+- **Manifest V3 Upgrade**: Upgraded `manifest.json` from `manifest_version: 2` to `manifest_version: 3` for Firefox extension standards compatibility.
+- **Manifest Action & Background Fixes**: Replaced deprecated `"browser_action"` with `"action"` and cleaned up background script parameters.
+- **Browser Compatibility**: Lowered `strict_min_version` from `"140.0"` to `"120.0"` in `browser_specific_settings.gecko` so the extension can be installed on current Firefox releases.
+- **Tab Groups API Safety**: Added conditional checks around `browser.tabGroups` in `popup.js` (`browser.tabGroups ? await browser.tabGroups.query({}) : []`) to avoid `TypeError` runtime crashes when `tabGroups` is unavailable.
+- **Documentation Alignment**: Updated `REVIEW_NOTES.md` to reference Manifest V3.
+
+---
+
+### Version 2.0.0 | Internal Version 5
+**Date:** 2026-08-09
+**Model:** Gemini 3.6 Flash
+**Client:** Antigravity CLI
+**Summary of Changes:**
+- **Name Standardization**: Updated all project references to the extension name from "Timely Tab Cleaner" / "TTT" to **Timely Tab Terminator** across `manifest.json`, `popup.html`, `background.js`, and `README.md`.
+- **Extension View Header**: Replaced the "TTT" acronym in `popup.html` header with the full title **Timely Tab Terminator**.
+
+---
+
 *Future entries should follow this format, incrementing the Internal Version by 1 for each new session.*
+
+

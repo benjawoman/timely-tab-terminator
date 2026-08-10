@@ -1,12 +1,12 @@
 {
-  "manifest_version": 2,
-  "name": "Timely Tab Cleaner",
+  "manifest_version": 3,
+  "name": "Timely Tab Terminator",
   "version": "2.0.0",
-  "description": "TTT — close idle tabs automatically, with a whitelist, tab-count threshold, and tab group protection.",
+  "description": "Timely Tab Terminator — close idle tabs automatically, with a whitelist, tab-count threshold, and tab group protection.",
   "browser_specific_settings": {
     "gecko": {
       "id": "tab-cleaner@yourname",
-      "strict_min_version": "140.0"
+      "strict_min_version": "120.0"
     }
   },
   "permissions": [
@@ -16,11 +16,10 @@
     "alarms"
   ],
   "background": {
-    "scripts": ["utils.js", "background.js"],
-    "persistent": false
+    "scripts": ["utils.js", "background.js"]
   },
-  "browser_action": {
-    "default_title": "Timely Tab Cleaner (TTT)",
+  "action": {
+    "default_title": "Timely Tab Terminator",
     "default_popup": "popup.html"
   }
 }

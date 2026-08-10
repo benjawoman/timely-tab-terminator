@@ -8,7 +8,7 @@ The submitted ZIP file IS the source code. There is no build process, no bundler
 
 | File | Purpose |
 |---|---|
-| `manifest.json` | Extension manifest (MV2) |
+| `manifest.json` | Extension manifest (MV3) |
 | `background.js` | Event page — tracks per-tab timestamps, runs periodic cleanup via `browser.alarms`, handles messages from the popup |
 | `popup.html` | Toolbar popup markup |
 | `popup.css` | Popup styles (CSS custom properties for dark/light mode) |

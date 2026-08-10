@@ -1,4 +1,4 @@
-# Timely Tab Cleaner (TTT)
+# Timely Tab Terminator
 
 A Firefox extension that automatically closes idle tabs to keep your browser clean, with a whitelist, tab-count threshold, and dark/light mode.
 
@@ -18,14 +18,14 @@ A Firefox extension that automatically closes idle tabs to keep your browser cle
 
 ### From Firefox Add-ons (AMO)
 
-Search for **Timely Tab Cleaner** on [addons.mozilla.org](https://addons.mozilla.org) or install directly from the listing page.
+Search for **Timely Tab Terminator** on [addons.mozilla.org](https://addons.mozilla.org) or install directly from the listing page.
 
 ### Manual (temporary, for development)
 
 1. Clone or download this repository
 2. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
 3. Click **Load Temporary Add-on…**
-4. Select any file inside the `firefox-tab-cleaner/` folder (e.g. `manifest.json`)
+4. Select any file inside the `timely-tab-terminator/` folder (e.g. `manifest.json`)
 
 Temporary installs are removed when Firefox closes. For a persistent install, use the signed version from AMO.
 
@@ -43,11 +43,11 @@ Temporary installs are removed when Firefox closes. For a persistent install, us
 
 ## Privacy
 
-Timely Tab Cleaner collects no user data. All information (tab timestamps, settings, whitelist) is stored locally in `browser.storage.local` and never transmitted anywhere. No analytics, no external requests.
+Timely Tab Terminator collects no user data. All information (tab timestamps, settings, whitelist) is stored locally in `browser.storage.local` and never transmitted anywhere. No analytics, no external requests.
 
 ## Requirements
 
-- Firefox 140 or later
+- Firefox 120 or later
 
 ## License
 

@@ -228,7 +228,7 @@ async function load() {
 
   const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
   const allTabs = await browser.tabs.query({});
-  const groups = await browser.tabGroups.query({});
+  const groups = browser.tabGroups ? await browser.tabGroups.query({}) : [];
   const state = await browser.runtime.sendMessage({ type: "getTabsState" });
 
   if (activeTab) renderCurrentTab(activeTab, state);
@@ -258,7 +258,7 @@ async function save() {
       whitelist
     });
     const allTabs = await browser.tabs.query({});
-    const groups = await browser.tabGroups.query({});
+    const groups = browser.tabGroups ? await browser.tabGroups.query({}) : [];
     const state = await browser.runtime.sendMessage({ type: "getTabsState" });
     renderTabList(allTabs, state, whitelist);
     renderGroupList(allTabs, groups, state);
@@ -299,7 +299,7 @@ async function sweepNow() {
     }
     
     const allTabs = await browser.tabs.query({});
-    const groups = await browser.tabGroups.query({});
+    const groups = browser.tabGroups ? await browser.tabGroups.query({}) : [];
     const state = await browser.runtime.sendMessage({ type: "getTabsState" });
     renderTabList(allTabs, state, parseWhitelist($("whitelist").value));
     renderGroupList(allTabs, groups, state);

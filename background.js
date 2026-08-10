@@ -112,7 +112,7 @@ async function removeTabs(ids) {
   try {
     await browser.tabs.remove([...ids]);
   } catch (e) {
-    console.error("Timely Tab Cleaner: tabs.remove failed", e);
+    console.error("Timely Tab Terminator: tabs.remove failed", e);
   }
   for (const id of ids) {
     delete lastActive[id];
