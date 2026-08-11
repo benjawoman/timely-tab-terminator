@@ -97,7 +97,7 @@ This document serves as a transparent record of all AI-assisted code modificatio
 
 ---
 
-### Version 2.0.1 | Internal Version 2
+### Version 2.0.2 | Internal Version 1
 **Date:** 2026-08-11
 **Model:** GPT-5.5
 **Client:** Chat (performance review)
