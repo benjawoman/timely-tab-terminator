@@ -62,7 +62,7 @@ Timely Tab Terminator collects no user data. Settings and the whitelist are stor
 
 ## Requirements
 
-- Firefox 139 or later (required for Tab Groups support)
+- Firefox 140 or later (required for Firefox data-collection permission disclosure support and Tab Groups support)
 
 ## License
 

@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Timely Tab Terminator",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Timely Tab Terminator — close idle tabs automatically, with a whitelist, tab-count threshold, and tab group protection.",
   "browser_specific_settings": {
     "gecko": {
       "id": "tab-cleaner@yourname",
-      "strict_min_version": "139.0",
+      "strict_min_version": "140.0",
       "data_collection_permissions": {
         "required": ["none"]
       }
