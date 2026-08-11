@@ -30,6 +30,13 @@ function nowMs() {
   return Date.now();
 }
 
+function getIdleMs(tab, now = nowMs()) {
+  if (tab.active) return 0;
+  const lastAccessed =
+    typeof tab.lastAccessed === "number" ? tab.lastAccessed : now;
+  return Math.max(0, now - lastAccessed);
+}
+
 /* ---------- whitelist ---------- */
 
 function isWhitelisted(url, whitelist) {
@@ -95,11 +102,9 @@ async function getTabInfo(tabs, now = nowMs()) {
   await Promise.all(
     tabs.map(async (tab) => {
       const created = await getCreatedAt(tab.id);
-      const lastAccessed =
-        typeof tab.lastAccessed === "number" ? tab.lastAccessed : now;
       info.set(tab.id, {
         createdAt: created ?? now,
-        idleMs: tab.active ? 0 : Math.max(0, now - lastAccessed),
+        idleMs: getIdleMs(tab, now),
         discarded: Boolean(tab.discarded)
       });
     })
@@ -125,21 +130,24 @@ function buildExcluder(settings, activeByWindow) {
 // number shown in the confirmation dialog always matches the logic that
 // actually runs.
 async function computeTabsToClose(settings, tabs, now, includeHardAge) {
-  const info = await getTabInfo(tabs, now);
   const activeByWindow = new Set(
     tabs.filter((t) => t.active).map((t) => `${t.windowId}:${t.id}`)
   );
   const isExcluded = buildExcluder(settings, activeByWindow);
+  const eligibleTabs = tabs.filter((tab) => !isExcluded(tab));
   const toClose = new Set();
 
   // 1) Hard age limit: close tabs that have been OPEN longer than the
-  //    limit, no matter how recently they were used.
+  //    limit, no matter how recently they were used. Only this rule needs
+  //    the slower sessions API, so automatic sweeps skip those calls.
   if (includeHardAge && settings.hardMaxAgeEnabled) {
     const hardCutoff = now - settings.hardMaxAgeMinutes * 60 * 1000;
-    for (const tab of tabs) {
-      if (isExcluded(tab)) continue;
-      if (info.get(tab.id).createdAt <= hardCutoff) toClose.add(tab.id);
-    }
+    await Promise.all(
+      eligibleTabs.map(async (tab) => {
+        const createdAt = (await getCreatedAt(tab.id)) ?? now;
+        if (createdAt <= hardCutoff) toClose.add(tab.id);
+      })
+    );
   }
 
   // 2) Idle limit + tab-count threshold.
@@ -147,17 +155,15 @@ async function computeTabsToClose(settings, tabs, now, includeHardAge) {
   const idleLimitMs = settings.maxAgeMinutes * 60 * 1000;
 
   if (settings.tabThreshold === 0) {
-    for (const tab of tabs) {
-      if (isExcluded(tab)) continue;
-      if (info.get(tab.id).idleMs >= idleLimitMs) toClose.add(tab.id);
+    for (const tab of eligibleTabs) {
+      if (getIdleMs(tab, now) >= idleLimitMs) toClose.add(tab.id);
     }
   } else if (tabs.length > settings.tabThreshold) {
     const candidates = [];
-    for (const tab of tabs) {
-      if (isExcluded(tab)) continue;
-      const tabInfo = info.get(tab.id);
-      if (tabInfo.idleMs >= idleLimitMs) {
-        candidates.push({ id: tab.id, idleMs: tabInfo.idleMs });
+    for (const tab of eligibleTabs) {
+      const idleMs = getIdleMs(tab, now);
+      if (idleMs >= idleLimitMs) {
+        candidates.push({ id: tab.id, idleMs });
       }
     }
     candidates.sort((a, b) => b.idleMs - a.idleMs); // most-idle first
