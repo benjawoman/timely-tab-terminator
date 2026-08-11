@@ -57,6 +57,46 @@ This document serves as a transparent record of all AI-assisted code modificatio
 
 ---
 
+### Version 2.0.0 | Internal Version 6
+**Date:** 2026-08-11
+**Model:** Qwen3.8 Max
+**Client:** Chat (bug review + tab-age persistence)
+**Summary of Changes:**
+- **Critical state fix (`background.js`)**: Manifest V3 event pages lose all in-memory state when unloaded; removed all reliance on in-memory timestamp maps. Tab open-time (`createdAt`) is now stored on each tab via `browser.sessions.setTabValue()` ("sessions" permission added), which survives tab unloading, close/restore cycles, and browser restarts with session restore.
+- **Data-loss fix**: removed the old pattern of saving partially-initialized in-memory maps to `storage.local`, which could overwrite previously stored timestamps; removed the unsafe debounced `setTimeout` save.
+- **Idle tracking**: replaced self-managed `lastActive` map with Firefox's native `tab.lastAccessed`, which persists across unloads and restarts. Behavior note: "idle" now means "not selected/visited by the user", so background auto-reloading tabs are no longer treated as active.
+- **Legacy cleanup**: `onInstalled` now removes obsolete `lastActive`/`createdAt` keys from `storage.local`.
+- **Consistency fix**: single `computeTabsToClose()` is now used by the automatic sweep, the "Run now" preview, and the confirmed run, so confirmation counts match the executed logic; tab closing now uses `Promise.allSettled` per tab.
+- **Hard age semantics**: the "Run now also closes tabs older than…" option now uses tab *open age* (was idle time), matching its name.
+- **Manual run behavior**: "Run now" works even when the automatic "Enabled" switch is off (the switch controls only the automatic sweep); hard-age closing remains manual-only.
+- **Tab list UX**: the popup now shows how long each tab has been *open* (idle time in tooltip), marks unloaded tabs with 💤, and "+ whitelist" now saves immediately.
+- **Compatibility**: raised `strict_min_version` to 139.0 (Tab Groups API requirement) and added `data_collection_permissions` for AMO compliance; shared `DEFAULTS`/helpers consolidated in `utils.js`.
+
+---
+
+### Version 2.0.0 | Internal Version 7
+**Date:** 2026-08-11
+**Model:** Qwen3.8 Max
+**Client:** Chat (icon setup + README review)
+**Summary of Changes:**
+- **Icons**: added `icons` and `action.default_icon` entries to `manifest.json` pointing at `icons/icon.png`, so the timer image is used for the add-ons manager and the toolbar button.
+- **README overhaul**: corrected Firefox requirement to 139+, updated feature/setting descriptions to match v2 behavior (open-age display, 💤 unloaded markers, hard-age semantics, Run-now-while-disabled), fixed the manual install step, documented tab-tracking behavior and known limitations, updated the privacy section for sessions-API storage, and added icon + project-structure sections.
+
+---
+
+### Version 2.0.1 | Internal Version 1
+**Date:** 2026-08-11
+**Model:** Qwen3.8 Max
+**Client:** Chat (manifest verification + icon wiring + release)
+**Summary of Changes:**
+- **Version bump**: public version 2.0.0 → 2.0.1; internal version reset to 1 per the versioning scheme.
+- **Manifest fix**: removed invalid top-level `default_icon` key (toolbar icons belong only inside `action.default_icon`).
+- **Icons**: wired resized icon set (`icons/icon-16/32/48/96.png`) consistently into `icons` (48/96) and `action.default_icon` (16/32), replacing the mixed/missing file references that could prevent the extension from loading.
+- **Verification**: confirmed against MDN/Mozilla sources that `data_collection_permissions.required: ["none"]` syntax is correct, and that `strict_min_version: 139.0` matches the Firefox release that introduced the `tabGroups` API.
+- **Docs**: README icon references updated to the resized icon set; no code changes required for the version bump.
+
+---
+
 *Future entries should follow this format, incrementing the Internal Version by 1 for each new session.*
 
 

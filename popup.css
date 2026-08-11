@@ -246,11 +246,21 @@ header strong { font-size: 13px; }
   font-size: 11px;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+  cursor: help;
 }
 
 .tab-list li.whitelisted .tab-age::after {
   content: " ★";
   color: var(--star);
+}
+
+/* Tabs that Firefox unloaded to save memory — still open, just sleeping. */
+.tab-list li.discarded .tab-host {
+  opacity: 0.75;
+}
+
+.tab-list li.discarded .tab-age::before {
+  content: "💤 ";
 }
 
 .tab-list li.grouped-tab .tab-host::before {

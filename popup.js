@@ -1,58 +1,37 @@
-const DEFAULTS = {
-  enabled: true,
-  maxAgeMinutes: 60,
-  tabThreshold: 20,
-  whitelist: [],
-  closePinned: false,
-  closeAudible: false,
-  hardMaxAgeEnabled: false,
-  hardMaxAgeMinutes: 10,
-  theme: "light"
-};
-
-const GROUP_COLORS = {
-  blue: "#1c71d8",
-  purple: "#9141ac",
-  cyan: "#0c8c8c",
-  green: "#26a269",
-  yellow: "#c89800",
-  orange: "#e66100",
-  red: "#e01b24",
-  pink: "#c061cb",
-  grey: "#77767b"
-};
-
-function applyTheme(dark) {
-  document.body.classList.toggle("dark", dark);
-  $("themeToggle").textContent = dark ? "☀️" : "🌙";
-}
+/* Timely Tab Terminator — popup script.
+ * Uses DEFAULTS, hostnameOf(), formatDuration(), parseWhitelist() and
+ * GROUP_COLORS from utils.js. */
 
 const $ = (id) => document.getElementById(id);
 
-// Cache DOM elements to avoid repeated queries
+// DOM element cache (filled by cacheElements()).
 const elements = {};
+
 function cacheElements() {
+  elements.themeToggle = $("themeToggle");
+  elements.enabled = $("enabled");
   elements.currentTabHost = $("currentTabHost");
   elements.currentTabAge = $("currentTabAge");
   elements.addToWhitelist = $("addToWhitelist");
+  elements.maxAge = $("maxAge");
+  elements.threshold = $("threshold");
+  elements.closePinned = $("closePinned");
+  elements.closeAudible = $("closeAudible");
+  elements.hardMaxAgeEnabled = $("hardMaxAgeEnabled");
+  elements.hardMaxAge = $("hardMaxAge");
   elements.tabCount = $("tabCount");
   elements.tabList = $("tabList");
-  elements.groupList = $("groupList");
   elements.groupCount = $("groupCount");
-  elements.status = $("status");
+  elements.groupList = $("groupList");
+  elements.whitelist = $("whitelist");
   elements.saveBtn = $("save");
   elements.sweepBtn = $("sweep");
+  elements.status = $("status");
 }
 
-function parseWhitelist(text) {
-  return text.split(/\r?\n/).map((l) => l.trim().toLowerCase()).filter(Boolean);
-}
-
-function flash(msg, isError = false) {
-  const el = elements.status;
-  el.textContent = msg;
-  el.style.color = isError ? "#c4292c" : "#1d8b3a";
-  setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 2000);
+function applyTheme(dark) {
+  document.body.classList.toggle("dark", dark);
+  elements.themeToggle.textContent = dark ? "☀️" : "🌙";
 }
 
 function isWhitelisted(host, whitelist) {
@@ -61,20 +40,67 @@ function isWhitelisted(host, whitelist) {
   return whitelist.some((e) => h === e || h.endsWith("." + e));
 }
 
+function flash(msg, isError = false) {
+  const el = elements.status;
+  el.textContent = msg;
+  el.style.color = isError ? "#c4292c" : "#1d8b3a";
+  setTimeout(() => {
+    if (el.textContent === msg) el.textContent = "";
+  }, 2000);
+}
+
+// Reads a whole number from an input field. Empty/invalid fields fall
+// back to the default instead of silently becoming 0.
+function readNumber(id, fallback, min) {
+  const value = parseInt($(id).value, 10);
+  if (Number.isNaN(value)) return fallback;
+  return Math.max(min, value);
+}
+
+// Asks the background for tab open-times / idle times. Never throws:
+// if the background is unavailable we fall back to empty maps.
+async function getTabsState() {
+  try {
+    const state = await browser.runtime.sendMessage({ type: "getTabsState" });
+    if (state && state.createdAt) return state;
+  } catch (e) {
+    console.warn("Timely Tab Terminator: could not reach background script", e);
+  }
+  return { createdAt: {}, idleMs: {}, discarded: {} };
+}
+
+async function getGroups() {
+  if (!browser.tabGroups) return [];
+  try {
+    return await browser.tabGroups.query({});
+  } catch (e) {
+    console.warn("Timely Tab Terminator: tabGroups query failed", e);
+    return [];
+  }
+}
+
 function renderCurrentTab(tab, state) {
   const host = hostnameOf(tab.url);
-  const hostEl = elements.currentTabHost;
-  hostEl.textContent = host || tab.title || tab.url || "—";
-  hostEl.title = tab.url || "";
+  elements.currentTabHost.textContent = host || tab.title || tab.url || "—";
+  elements.currentTabHost.title = tab.url || "";
 
   const created = state.createdAt[tab.id];
-  elements.currentTabAge.textContent = created
-    ? `Opened ${formatDuration(Date.now() - created)} ago`
-    : "Opened recently";
+  const idle = state.idleMs[tab.id];
+  const parts = [
+    created != null
+      ? `Opened ${formatDuration(Date.now() - created)} ago`
+      : "Opened recently"
+  ];
+  if (!tab.active && typeof idle === "number") {
+    parts.push(`idle ${formatDuration(idle)}`);
+  }
+  if (state.discarded[tab.id]) parts.push("unloaded by Firefox");
+  elements.currentTabAge.textContent = parts.join(" · ");
 
-  const addBtn = elements.addToWhitelist;
-  addBtn.disabled = !host;
-  addBtn.title = host ? `Add ${host} to the whitelist` : "Cannot whitelist this page type";
+  elements.addToWhitelist.disabled = !host;
+  elements.addToWhitelist.title = host
+    ? `Add ${host} to the whitelist`
+    : "Cannot whitelist this page type";
 }
 
 function renderTabList(tabs, state, whitelist) {
@@ -84,18 +110,25 @@ function renderTabList(tabs, state, whitelist) {
 
   const now = Date.now();
   const rows = tabs.map((t) => {
-    const idleMs = t.active ? 0 : now - (state.lastActive[t.id] || now);
-    return { tab: t, idleMs };
-  });
-  // Oldest-idle first; active tabs sink to the bottom.
-  rows.sort((a, b) => {
-    if (a.tab.active !== b.tab.active) return a.tab.active ? 1 : -1;
-    return b.idleMs - a.idleMs;
+    const created = state.createdAt[t.id];
+    return {
+      tab: t,
+      openMs: created != null ? Math.max(0, now - created) : null,
+      idleMs: t.active ? 0 : (state.idleMs[t.id] ?? 0)
+    };
   });
 
-  for (const { tab, idleMs } of rows) {
+  // Active tab last; otherwise longest-open first.
+  rows.sort((a, b) => {
+    if (a.tab.active !== b.tab.active) return a.tab.active ? 1 : -1;
+    return (b.openMs ?? -1) - (a.openMs ?? -1);
+  });
+
+  for (const { tab, openMs, idleMs } of rows) {
     const li = document.createElement("li");
     if (tab.active) li.classList.add("active-tab");
+    if (state.discarded[tab.id]) li.classList.add("discarded");
+
     const host = hostnameOf(tab.url);
     if (isWhitelisted(host, whitelist)) li.classList.add("whitelisted");
     if (tab.groupId != null && tab.groupId !== -1) li.classList.add("grouped-tab");
@@ -107,7 +140,14 @@ function renderTabList(tabs, state, whitelist) {
 
     const ageEl = document.createElement("span");
     ageEl.className = "tab-age";
-    ageEl.textContent = tab.active ? "active" : formatDuration(idleMs);
+    ageEl.textContent = tab.active
+      ? "active"
+      : openMs != null
+        ? formatDuration(openMs)
+        : "—";
+    ageEl.title = tab.active
+      ? "This is the currently selected tab"
+      : `open: ${openMs != null ? formatDuration(openMs) : "unknown"}\nidle: ${formatDuration(idleMs)}${state.discarded[tab.id] ? "\nunloaded by Firefox (still open)" : ""}`;
 
     li.appendChild(hostEl);
     li.appendChild(ageEl);
@@ -146,8 +186,8 @@ function renderGroupList(tabs, groups, state) {
       title: meta?.title || "Untitled group",
       color: meta?.color || "grey",
       tabs: groupTabs.sort((a, b) => {
-        const aOpen = now - (state.createdAt[a.id] || now);
-        const bOpen = now - (state.createdAt[b.id] || now);
+        const aOpen = now - (state.createdAt[a.id] ?? now);
+        const bOpen = now - (state.createdAt[b.id] ?? now);
         return bOpen - aOpen;
       })
     };
@@ -196,9 +236,7 @@ function renderGroupList(tabs, groups, state) {
       const ageEl = document.createElement("span");
       ageEl.className = "tab-age";
       const created = state.createdAt[tab.id];
-      ageEl.textContent = created
-        ? formatDuration(now - created)
-        : "recent";
+      ageEl.textContent = created != null ? formatDuration(now - created) : "recent";
 
       li.appendChild(hostEl);
       li.appendChild(ageEl);
@@ -210,59 +248,68 @@ function renderGroupList(tabs, groups, state) {
   }
 }
 
-async function load() {
-  const stored = await browser.storage.local.get(DEFAULTS);
-  const s = { ...DEFAULTS, ...stored };
-  applyTheme(s.theme === "dark");
-  $("enabled").checked = s.enabled;
-  $("maxAge").value = s.maxAgeMinutes;
-  $("threshold").value = s.tabThreshold;
-  $("closePinned").checked = s.closePinned;
-  $("closeAudible").checked = s.closeAudible;
-  $("hardMaxAgeEnabled").checked = s.hardMaxAgeEnabled;
-  $("hardMaxAge").value = s.hardMaxAgeMinutes;
-  $("hardMaxAge").disabled = !s.hardMaxAgeEnabled;
-  $("whitelist").value = (s.whitelist || []).join("\n");
-
-  cacheElements();
-
-  const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-  const allTabs = await browser.tabs.query({});
-  const groups = browser.tabGroups ? await browser.tabGroups.query({}) : [];
-  const state = await browser.runtime.sendMessage({ type: "getTabsState" });
-
-  if (activeTab) renderCurrentTab(activeTab, state);
-  renderTabList(allTabs, state, s.whitelist || []);
+async function refreshViews(whitelist) {
+  const [allTabs, state, groups] = await Promise.all([
+    browser.tabs.query({}),
+    getTabsState(),
+    getGroups()
+  ]);
+  renderTabList(allTabs, state, whitelist ?? parseWhitelist(elements.whitelist.value));
   renderGroupList(allTabs, groups, state);
 }
 
+async function load() {
+  cacheElements();
+
+  const stored = await browser.storage.local.get(DEFAULTS);
+  const s = { ...DEFAULTS, ...stored };
+
+  applyTheme(s.theme === "dark");
+  elements.enabled.checked = s.enabled;
+  elements.maxAge.value = s.maxAgeMinutes;
+  elements.threshold.value = s.tabThreshold;
+  elements.closePinned.checked = s.closePinned;
+  elements.closeAudible.checked = s.closeAudible;
+  elements.hardMaxAgeEnabled.checked = s.hardMaxAgeEnabled;
+  elements.hardMaxAge.value = s.hardMaxAgeMinutes;
+  elements.hardMaxAge.disabled = !s.hardMaxAgeEnabled;
+  elements.whitelist.value = (s.whitelist || []).join("\n");
+
+  try {
+    const [activeTabResult, allTabs, state, groups] = await Promise.all([
+      browser.tabs.query({ active: true, currentWindow: true }),
+      browser.tabs.query({}),
+      getTabsState(),
+      getGroups()
+    ]);
+    const activeTab = activeTabResult[0];
+
+    if (activeTab) renderCurrentTab(activeTab, state);
+    renderTabList(allTabs, state, s.whitelist || []);
+    renderGroupList(allTabs, groups, state);
+  } catch (e) {
+    flash(`Could not load tab data: ${e.message}`, true);
+  }
+}
+
 async function save() {
-  const maxAge = Math.max(1, parseInt($("maxAge").value, 10) || DEFAULTS.maxAgeMinutes);
-  const threshold = Math.max(0, parseInt($("threshold").value, 10) || 0);
-  const hardMaxAgeEnabled = $("hardMaxAgeEnabled").checked;
-  const hardMaxAgeMinutes = Math.max(1, parseInt($("hardMaxAge").value, 10) || DEFAULTS.hardMaxAgeMinutes);
-  const whitelist = parseWhitelist($("whitelist").value);
-  
   elements.saveBtn.disabled = true;
   elements.saveBtn.textContent = "Saving...";
-  
+
   try {
+    const whitelist = parseWhitelist(elements.whitelist.value);
     await browser.storage.local.set({
-      enabled: $("enabled").checked,
-      maxAgeMinutes: maxAge,
-      tabThreshold: threshold,
-      closePinned: $("closePinned").checked,
-      closeAudible: $("closeAudible").checked,
-      hardMaxAgeEnabled,
-      hardMaxAgeMinutes,
+      enabled: elements.enabled.checked,
+      maxAgeMinutes: readNumber("maxAge", DEFAULTS.maxAgeMinutes, 1),
+      tabThreshold: readNumber("threshold", DEFAULTS.tabThreshold, 0),
+      closePinned: elements.closePinned.checked,
+      closeAudible: elements.closeAudible.checked,
+      hardMaxAgeEnabled: elements.hardMaxAgeEnabled.checked,
+      hardMaxAgeMinutes: readNumber("hardMaxAge", DEFAULTS.hardMaxAgeMinutes, 1),
       whitelist
     });
-    const allTabs = await browser.tabs.query({});
-    const groups = browser.tabGroups ? await browser.tabGroups.query({}) : [];
-    const state = await browser.runtime.sendMessage({ type: "getTabsState" });
-    renderTabList(allTabs, state, whitelist);
-    renderGroupList(allTabs, groups, state);
     flash("Saved");
+    await refreshViews(whitelist);
   } catch (e) {
     flash(`Save failed: ${e.message}`, true);
   } finally {
@@ -274,36 +321,31 @@ async function save() {
 async function sweepNow() {
   elements.sweepBtn.disabled = true;
   elements.sweepBtn.textContent = "Running...";
-  
+
   try {
     await save();
     const result = await browser.runtime.sendMessage({ type: "runSweepNow" });
-    
-    // Handle confirmation request
+
     if (result && result.needsConfirmation) {
-      const confirmed = confirm(
-        `About to close ${result.count} of ${result.total} tabs.\n\n` +
-        `This is ${(result.count / result.total * 100).toFixed(0)}% of your open tabs.\n\n` +
-        `Do you want to proceed?`
+      const pct = result.total > 0 ? Math.round((result.count / result.total) * 100) : 0;
+      const confirmed = window.confirm(
+        `About to close ${result.count} of ${result.total} tabs (${pct}%).\n\nDo you want to proceed?`
       );
-      
+
       if (!confirmed) {
-        elements.sweepBtn.disabled = false;
-        elements.sweepBtn.textContent = "Run now";
         flash("Cleanup cancelled");
         return;
       }
-      
-      // User confirmed, run the cleanup
+
       await browser.runtime.sendMessage({ type: "confirmAndRunSweep" });
     }
-    
-    const allTabs = await browser.tabs.query({});
-    const groups = browser.tabGroups ? await browser.tabGroups.query({}) : [];
-    const state = await browser.runtime.sendMessage({ type: "getTabsState" });
-    renderTabList(allTabs, state, parseWhitelist($("whitelist").value));
-    renderGroupList(allTabs, groups, state);
-    flash("Cleanup run");
+
+    await refreshViews();
+    if (result && typeof result.closed === "number") {
+      flash(`Cleanup run — closed ${result.closed} tab${result.closed === 1 ? "" : "s"}`);
+    } else {
+      flash("Cleanup run");
+    }
   } catch (e) {
     flash(`Cleanup failed: ${e.message}`, true);
   } finally {
@@ -317,26 +359,39 @@ async function addCurrentSiteToWhitelist() {
   if (!tab) return;
   const host = hostnameOf(tab.url);
   if (!host) return;
-  const current = parseWhitelist($("whitelist").value);
+
+  const current = parseWhitelist(elements.whitelist.value);
   const lower = host.toLowerCase();
   if (current.includes(lower)) {
-    flash(`${host} already whitelisted`);
+    flash(`${host} is already whitelisted`);
     return;
   }
+
   current.push(lower);
-  $("whitelist").value = current.join("\n");
-  flash(`Added ${host}`);
+  elements.whitelist.value = current.join("\n");
+  try {
+    await browser.storage.local.set({ whitelist: current });
+    flash(`Added ${host} and saved`);
+    await refreshViews(current);
+  } catch (e) {
+    flash(`Added ${host} — click Save to keep it`, true);
+  }
 }
 
-document.addEventListener("DOMContentLoaded", load);
-$("save").addEventListener("click", save);
-$("sweep").addEventListener("click", sweepNow);
-$("addToWhitelist").addEventListener("click", addCurrentSiteToWhitelist);
-$("hardMaxAgeEnabled").addEventListener("change", (e) => {
-  $("hardMaxAge").disabled = !e.target.checked;
-});
-$("themeToggle").addEventListener("click", async () => {
-  const dark = !document.body.classList.contains("dark");
-  applyTheme(dark);
-  await browser.storage.local.set({ theme: dark ? "dark" : "light" });
+document.addEventListener("DOMContentLoaded", () => {
+  cacheElements();
+
+  elements.saveBtn.addEventListener("click", save);
+  elements.sweepBtn.addEventListener("click", sweepNow);
+  elements.addToWhitelist.addEventListener("click", addCurrentSiteToWhitelist);
+  elements.hardMaxAgeEnabled.addEventListener("change", (e) => {
+    elements.hardMaxAge.disabled = !e.target.checked;
+  });
+  elements.themeToggle.addEventListener("click", async () => {
+    const dark = !document.body.classList.contains("dark");
+    applyTheme(dark);
+    await browser.storage.local.set({ theme: dark ? "dark" : "light" });
+  });
+
+  load();
 });

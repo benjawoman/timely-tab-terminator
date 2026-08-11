@@ -48,7 +48,7 @@
 
   <section aria-label="Open tabs">
     <div class="section-head">
-      <span>Open tabs</span>
+      <span title="Shows how long each tab has been open. Hover a tab to see its idle time. Unloaded tabs show 💤.">Open tabs</span>
       <span class="muted" id="tabCount">0</span>
     </div>
     <ul class="tab-list" id="tabList"></ul>
@@ -68,12 +68,12 @@
   </section>
 
   <div class="hard-age-row">
-    <label class="check hard-age-label">
+    <label class="check hard-age-label" title="When checked, Run now also closes tabs that have been OPEN longer than this — even if they were used recently.">
       <input type="checkbox" id="hardMaxAgeEnabled" />
-      <span>On Run Now, also close idle</span>
+      <span>Run now also closes tabs older than</span>
     </label>
     <div class="num-wrap">
-      <input type="number" id="hardMaxAge" min="1" step="1" aria-label="Hard max age in minutes" />
+      <input type="number" id="hardMaxAge" min="1" step="1" aria-label="Hard max tab age in minutes" />
       <span class="unit">min</span>
     </div>
   </div>

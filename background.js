@@ -1,50 +1,25 @@
-const DEFAULTS = {
-  enabled: true,
-  maxAgeMinutes: 60,
-  tabThreshold: 20,
-  whitelist: [],
-  closePinned: false,
-  closeAudible: false,
-  hardMaxAgeEnabled: false,
-  hardMaxAgeMinutes: 10
-};
+/* Timely Tab Terminator — background script (Manifest V3 event page).
+ *
+ * IMPORTANT DESIGN NOTES:
+ * - In Manifest V3, Firefox runs this as a NON-PERSISTENT event page:
+ *   it is switched off when idle and ALL in-memory variables are lost.
+ *   Therefore nothing important is ever kept in memory here.
+ * - Tab open-time ("createdAt") is stored ON THE TAB ITSELF using
+ *   browser.sessions.setTabValue(). This survives tab unloading,
+ *   close/restore (Ctrl+Shift+T), and browser restarts with session
+ *   restore.
+ * - Idle time comes from Firefox's own tab.lastAccessed timestamp,
+ *   which Firefox maintains for us across unloads and restarts.
+ */
 
 const ALARM_NAME = "tab-cleaner-sweep";
 const SWEEP_PERIOD_MINUTES = 1;
-const SAVE_DEBOUNCE_MS = 500;
+const CREATED_AT_KEY = "ttt.createdAt";
 
-// Per-tab timestamps (ms). Persisted so they survive browser restarts.
-let lastActive = {};
-let createdAt = {};
-let saveDebounceTimer = null;
-let stateLoaded = false;
+const CLOSE_COUNT_THRESHOLD = 5;
+const CLOSE_PERCENT_THRESHOLD = 0.2;
 
-async function loadState() {
-  if (stateLoaded) return;
-  const stored = await browser.storage.local.get(["lastActive", "createdAt"]);
-  lastActive = stored.lastActive || {};
-  createdAt = stored.createdAt || {};
-  stateLoaded = true;
-}
-
-async function saveState() {
-  if (saveDebounceTimer) {
-    clearTimeout(saveDebounceTimer);
-  }
-  saveDebounceTimer = setTimeout(async () => {
-    await browser.storage.local.set({ lastActive, createdAt });
-    saveDebounceTimer = null;
-  }, SAVE_DEBOUNCE_MS);
-}
-
-// Force immediate save when needed (e.g., before extension suspension)
-async function saveStateImmediate() {
-  if (saveDebounceTimer) {
-    clearTimeout(saveDebounceTimer);
-    saveDebounceTimer = null;
-  }
-  await browser.storage.local.set({ lastActive, createdAt });
-}
+/* ---------- settings ---------- */
 
 async function getSettings() {
   const stored = await browser.storage.local.get(DEFAULTS);
@@ -54,6 +29,8 @@ async function getSettings() {
 function nowMs() {
   return Date.now();
 }
+
+/* ---------- whitelist ---------- */
 
 function isWhitelisted(url, whitelist) {
   if (!url) return false;
@@ -70,31 +47,67 @@ function isWhitelisted(url, whitelist) {
   });
 }
 
-async function touchTab(tabId) {
-  lastActive[tabId] = nowMs();
-  saveState(); // Debounced, no await needed for frequent calls
+/* ---------- per-tab open-time (survives unload + restart) ---------- */
+
+async function getCreatedAt(tabId) {
+  try {
+    const value = await browser.sessions.getTabValue(tabId, CREATED_AT_KEY);
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  } catch (e) {
+    // Tab no longer exists, or the sessions API is unavailable.
+  }
+  return null;
 }
 
-async function initializeTabs() {
-  const tabs = await browser.tabs.query({});
-  const now = nowMs();
-  
-  for (const t of tabs) {
-    if (lastActive[t.id] == null) lastActive[t.id] = now;
-    // Preserve createdAt across sessions - only set if not already present
-    if (createdAt[t.id] == null) createdAt[t.id] = now;
+async function setCreatedAt(tabId, timestamp) {
+  try {
+    await browser.sessions.setTabValue(tabId, CREATED_AT_KEY, timestamp);
+  } catch (e) {
+    console.warn("Timely Tab Terminator: could not store tab open-time", e);
   }
-  
-  // Drop stale ids no longer present.
-  const liveIds = new Set(tabs.map((t) => t.id));
-  for (const id of Object.keys(lastActive)) {
-    if (!liveIds.has(Number(id))) delete lastActive[id];
-  }
-  for (const id of Object.keys(createdAt)) {
-    if (!liveIds.has(Number(id))) delete createdAt[id];
-  }
-  await saveStateImmediate();
 }
+
+// Makes sure a tab has an open-time. Restored tabs (session restore or
+// Ctrl+Shift+T) already carry their original value; only tabs that have
+// none get stamped.
+async function ensureCreatedAt(tab, now = nowMs()) {
+  const existing = await getCreatedAt(tab.id);
+  if (existing != null) return existing;
+
+  // Seed value: Firefox's lastAccessed is the best available hint for
+  // when an already-existing/restored tab was opened.
+  let seed = now;
+  if (
+    typeof tab.lastAccessed === "number" &&
+    tab.lastAccessed > 0 &&
+    tab.lastAccessed <= now
+  ) {
+    seed = tab.lastAccessed;
+  }
+  await setCreatedAt(tab.id, seed);
+  return seed;
+}
+
+/* ---------- tab info (open-time + idle time) ---------- */
+
+async function getTabInfo(tabs, now = nowMs()) {
+  const info = new Map();
+  await Promise.all(
+    tabs.map(async (tab) => {
+      const created = await getCreatedAt(tab.id);
+      const lastAccessed =
+        typeof tab.lastAccessed === "number" ? tab.lastAccessed : now;
+      info.set(tab.id, {
+        createdAt: created ?? now,
+        idleMs: tab.active ? 0 : Math.max(0, now - lastAccessed),
+        discarded: Boolean(tab.discarded)
+      });
+    })
+  );
+  return info;
+}
+
+/* ---------- deciding which tabs may be closed ---------- */
 
 function buildExcluder(settings, activeByWindow) {
   return function isExcluded(tab) {
@@ -107,102 +120,129 @@ function buildExcluder(settings, activeByWindow) {
   };
 }
 
-async function removeTabs(ids) {
-  if (ids.size === 0) return;
-  try {
-    await browser.tabs.remove([...ids]);
-  } catch (e) {
-    console.error("Timely Tab Terminator: tabs.remove failed", e);
+// Single source of truth for "which tabs should close". Used by the
+// automatic sweep, the "Run now" preview, and the confirmed run, so the
+// number shown in the confirmation dialog always matches the logic that
+// actually runs.
+async function computeTabsToClose(settings, tabs, now, includeHardAge) {
+  const info = await getTabInfo(tabs, now);
+  const activeByWindow = new Set(
+    tabs.filter((t) => t.active).map((t) => `${t.windowId}:${t.id}`)
+  );
+  const isExcluded = buildExcluder(settings, activeByWindow);
+  const toClose = new Set();
+
+  // 1) Hard age limit: close tabs that have been OPEN longer than the
+  //    limit, no matter how recently they were used.
+  if (includeHardAge && settings.hardMaxAgeEnabled) {
+    const hardCutoff = now - settings.hardMaxAgeMinutes * 60 * 1000;
+    for (const tab of tabs) {
+      if (isExcluded(tab)) continue;
+      if (info.get(tab.id).createdAt <= hardCutoff) toClose.add(tab.id);
+    }
   }
-  for (const id of ids) {
-    delete lastActive[id];
-    delete createdAt[id];
+
+  // 2) Idle limit + tab-count threshold.
+  //    threshold = 0 means "no floor": close every idle-enough tab.
+  const idleLimitMs = settings.maxAgeMinutes * 60 * 1000;
+
+  if (settings.tabThreshold === 0) {
+    for (const tab of tabs) {
+      if (isExcluded(tab)) continue;
+      if (info.get(tab.id).idleMs >= idleLimitMs) toClose.add(tab.id);
+    }
+  } else if (tabs.length > settings.tabThreshold) {
+    const candidates = [];
+    for (const tab of tabs) {
+      if (isExcluded(tab)) continue;
+      const tabInfo = info.get(tab.id);
+      if (tabInfo.idleMs >= idleLimitMs) {
+        candidates.push({ id: tab.id, idleMs: tabInfo.idleMs });
+      }
+    }
+    candidates.sort((a, b) => b.idleMs - a.idleMs); // most-idle first
+    const overage = tabs.length - settings.tabThreshold;
+    for (const c of candidates.slice(0, overage)) toClose.add(c.id);
   }
-  await saveStateImmediate();
+
+  return toClose;
 }
 
-// Runs on every alarm tick. Handles the threshold-based auto-cleanup.
-// threshold=0 means no floor: close every eligible tab past maxAgeMinutes.
+function needsConfirmation(tabsToCloseCount, totalTabs) {
+  if (tabsToCloseCount === 0) return false;
+  return (
+    tabsToCloseCount >= CLOSE_COUNT_THRESHOLD ||
+    (totalTabs > 0 && tabsToCloseCount / totalTabs > CLOSE_PERCENT_THRESHOLD)
+  );
+}
+
+/* ---------- closing tabs ---------- */
+
+async function removeTabs(ids) {
+  if (ids.size === 0) return 0;
+  const idArray = [...ids];
+  const results = await Promise.allSettled(
+    idArray.map((id) => browser.tabs.remove(id))
+  );
+  let closed = 0;
+  results.forEach((result, i) => {
+    if (result.status === "fulfilled") {
+      closed += 1;
+    } else {
+      console.warn(
+        "Timely Tab Terminator: failed to close tab",
+        idArray[i],
+        result.reason
+      );
+    }
+  });
+  // NOTE: we deliberately do NOT erase session values for closed tabs.
+  // Keeping them means a tab restored with Ctrl+Shift+T keeps its age.
+  return closed;
+}
+
+/* ---------- automatic sweep (runs on the alarm) ---------- */
+
 async function sweep() {
   const settings = await getSettings();
   if (!settings.enabled) return;
 
   const tabs = await browser.tabs.query({});
-  
-  // Early exit if no tabs to process
   if (tabs.length === 0) return;
 
-  const now = nowMs();
-  const activeByWindow = new Set(
-    tabs.filter((t) => t.active).map((t) => `${t.windowId}:${t.id}`)
-  );
-  const isExcluded = buildExcluder(settings, activeByWindow);
-  const softCutoff = now - settings.maxAgeMinutes * 60 * 1000;
-  const toClose = new Set();
-
-  if (settings.tabThreshold === 0) {
-    // No minimum: close every eligible tab past the idle limit.
-    for (const tab of tabs) {
-      if (isExcluded(tab)) continue;
-      const last = lastActive[tab.id] ?? now;
-      if (last <= softCutoff) toClose.add(tab.id);
-    }
-  } else if (tabs.length > settings.tabThreshold) {
-    // Over threshold: close oldest-idle tabs until back under the limit.
-    const candidates = [];
-    for (const tab of tabs) {
-      if (isExcluded(tab)) continue;
-      const last = lastActive[tab.id] ?? now;
-      if (last <= softCutoff) candidates.push({ id: tab.id, last });
-    }
-    candidates.sort((a, b) => a.last - b.last);
-    const overage = tabs.length - settings.tabThreshold;
-    for (const c of candidates.slice(0, overage)) toClose.add(c.id);
-  }
-
+  // Automatic sweeps use only the idle/threshold rules (no hard age).
+  const toClose = await computeTabsToClose(settings, tabs, nowMs(), false);
   await removeTabs(toClose);
 }
 
-// Runs only when the user clicks "Run now". Closes every eligible tab
-// idle longer than hardMaxAgeMinutes, ignoring the tab count entirely.
-async function sweepHardAge(settings, tabs) {
-  if (!settings.hardMaxAgeEnabled) return;
+/* ---------- startup / install ---------- */
+
+async function initializeTabs() {
+  const tabs = await browser.tabs.query({});
   const now = nowMs();
-  const hardCutoff = now - settings.hardMaxAgeMinutes * 60 * 1000;
-  const activeByWindow = new Set(
-    tabs.filter((t) => t.active).map((t) => `${t.windowId}:${t.id}`)
-  );
-  const isExcluded = buildExcluder(settings, activeByWindow);
-  const toClose = new Set();
-  for (const tab of tabs) {
-    if (isExcluded(tab)) continue;
-    const last = lastActive[tab.id] ?? now;
-    if (last <= hardCutoff) toClose.add(tab.id);
-  }
-  await removeTabs(toClose);
+  await Promise.all(tabs.map((tab) => ensureCreatedAt(tab, now)));
 }
 
-// Calculate if confirmation is needed based on proportion of tabs to close
-const CLOSE_COUNT_THRESHOLD = 5;
-const CLOSE_PERCENT_THRESHOLD = 0.2;
-
-function needsConfirmation(tabsToCloseCount, totalTabs) {
-  if (tabsToCloseCount === 0) return false;
-  // Confirm if closing 5 or more tabs OR more than 20% of total tabs
-  return tabsToCloseCount >= CLOSE_COUNT_THRESHOLD || (totalTabs > 0 && tabsToCloseCount / totalTabs > CLOSE_PERCENT_THRESHOLD);
+async function ensureAlarm() {
+  const existing = await browser.alarms.get(ALARM_NAME);
+  if (!existing) {
+    browser.alarms.create(ALARM_NAME, { periodInMinutes: SWEEP_PERIOD_MINUTES });
+  }
 }
 
 browser.runtime.onInstalled.addListener(async () => {
   const stored = await browser.storage.local.get(DEFAULTS);
-  const merged = { ...DEFAULTS, ...stored };
-  await browser.storage.local.set(merged);
+  await browser.storage.local.set({ ...DEFAULTS, ...stored });
+  // Remove leftovers from the old implementation, which stored
+  // timestamps keyed by tab id (unreliable; no longer used).
+  await browser.storage.local.remove(["lastActive", "createdAt"]);
   await initializeTabs();
-  browser.alarms.create(ALARM_NAME, { periodInMinutes: SWEEP_PERIOD_MINUTES });
+  await ensureAlarm();
 });
 
 browser.runtime.onStartup.addListener(async () => {
   await initializeTabs();
-  browser.alarms.create(ALARM_NAME, { periodInMinutes: SWEEP_PERIOD_MINUTES });
+  await ensureAlarm();
 });
 
 browser.alarms.onAlarm.addListener(async (alarm) => {
@@ -210,90 +250,66 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   await sweep();
 });
 
+// New tabs — including tabs being restored after a restart or via
+// Ctrl+Shift+T. Restored tabs already carry their original open-time,
+// so ensureCreatedAt() only stamps genuinely new tabs.
 browser.tabs.onCreated.addListener(async (tab) => {
-  lastActive[tab.id] = nowMs();
-  createdAt[tab.id] = nowMs();
-  saveState(); // Debounced
+  await ensureCreatedAt(tab);
 });
 
-browser.tabs.onActivated.addListener(async ({ tabId }) => {
-  touchTab(tabId); // Already debounced
-});
-
-browser.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
-  if (changeInfo.status === "complete" || changeInfo.url) {
-    touchTab(tabId); // Already debounced
+// Tabs moved between windows can lose their session data; re-stamp.
+browser.tabs.onAttached.addListener(async (tabId) => {
+  try {
+    const tab = await browser.tabs.get(tabId);
+    await ensureCreatedAt(tab);
+  } catch (e) {
+    // Tab already gone; nothing to do.
   }
 });
 
-browser.tabs.onRemoved.addListener(async (tabId) => {
-  delete lastActive[tabId];
-  delete createdAt[tabId];
-  saveState(); // Debounced
-});
+/* ---------- messages from the popup ---------- */
 
-browser.runtime.onMessage.addListener(async (msg) => {
-  if (!msg) return;
-  if (msg.type === "runSweepNow") {
-    const settings = await getSettings();
-    const tabs = await browser.tabs.query({});
-    
-    // Calculate which tabs would be closed for confirmation
-    const now = nowMs();
-    const hardCutoff = settings.hardMaxAgeEnabled ? now - settings.hardMaxAgeMinutes * 60 * 1000 : Infinity;
-    const softCutoff = now - settings.maxAgeMinutes * 60 * 1000;
-    const activeByWindow = new Set(
-      tabs.filter((t) => t.active).map((t) => `${t.windowId}:${t.id}`)
-    );
-    const isExcluded = buildExcluder(settings, activeByWindow);
-    const toClose = new Set();
-    
-    // Check hard age tabs
-    if (settings.hardMaxAgeEnabled) {
-      for (const tab of tabs) {
-        if (isExcluded(tab)) continue;
-        const last = lastActive[tab.id] ?? now;
-        if (last <= hardCutoff) toClose.add(tab.id);
-      }
-    }
-    
-    // Check threshold-based tabs
-    if (settings.tabThreshold === 0) {
-      for (const tab of tabs) {
-        if (isExcluded(tab)) continue;
-        const last = lastActive[tab.id] ?? now;
-        if (last <= softCutoff) toClose.add(tab.id);
-      }
-    } else if (tabs.length > settings.tabThreshold) {
-      const candidates = [];
-      for (const tab of tabs) {
-        if (isExcluded(tab)) continue;
-        const last = lastActive[tab.id] ?? now;
-        if (last <= softCutoff) candidates.push({ id: tab.id, last });
-      }
-      candidates.sort((a, b) => a.last - b.last);
-      const overage = tabs.length - settings.tabThreshold;
-      for (const c of candidates.slice(0, overage)) toClose.add(c.id);
-    }
-    
-    // If confirmation needed, send details back to popup
-    if (needsConfirmation(toClose.size, tabs.length)) {
-      return { needsConfirmation: true, count: toClose.size, total: tabs.length };
-    }
-    
-    // Proceed with cleanup if no confirmation needed
-    await removeTabs(toClose);
-    return { ok: true };
-  }
-  if (msg.type === "confirmAndRunSweep") {
-    // User confirmed, proceed with cleanup
-    const settings = await getSettings();
-    const tabs = await browser.tabs.query({});
-    await sweepHardAge(settings, tabs);
-    await sweep();
-    return { ok: true };
-  }
+browser.runtime.onMessage.addListener((msg) => {
+  if (!msg || typeof msg !== "object" || !msg.type) return;
+
   if (msg.type === "getTabsState") {
-    return { lastActive, createdAt };
+    return (async () => {
+      const tabs = await browser.tabs.query({});
+      const info = await getTabInfo(tabs, nowMs());
+      const createdAt = {};
+      const idleMs = {};
+      const discarded = {};
+      for (const tab of tabs) {
+        const tabInfo = info.get(tab.id);
+        createdAt[tab.id] = tabInfo.createdAt;
+        idleMs[tab.id] = tabInfo.idleMs;
+        discarded[tab.id] = tabInfo.discarded;
+      }
+      return { createdAt, idleMs, discarded };
+    })();
   }
+
+  // Manual "Run now". This works even when the automatic "Enabled"
+  // switch is off — the switch only controls the automatic sweep.
+  // Hard-age closing only ever happens here, never automatically.
+  if (msg.type === "runSweepNow" || msg.type === "confirmAndRunSweep") {
+    return (async () => {
+      const settings = await getSettings();
+      const tabs = await browser.tabs.query({});
+      const now = nowMs();
+      const toClose = await computeTabsToClose(settings, tabs, now, true);
+
+      if (
+        msg.type === "runSweepNow" &&
+        needsConfirmation(toClose.size, tabs.length)
+      ) {
+        return { needsConfirmation: true, count: toClose.size, total: tabs.length };
+      }
+
+      const closed = await removeTabs(toClose);
+      return { ok: true, closed };
+    })();
+  }
+
+  // Unknown message type: no response.
 });
