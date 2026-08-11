@@ -97,6 +97,18 @@ This document serves as a transparent record of all AI-assisted code modificatio
 
 ---
 
+### Version 2.0.1 | Internal Version 2
+**Date:** 2026-08-11
+**Model:** GPT-5.5
+**Client:** Chat (performance review)
+**Summary of Changes:**
+- **Automatic sweep performance**: optimized `computeTabsToClose()` so automatic idle sweeps no longer fetch per-tab `createdAt` values from the Firefox `sessions` API when hard-age cleanup is not in use.
+- **Eligibility pass**: compute the eligible tab list once before applying close rules, avoiding repeated pinned/audible/group/whitelist exclusion checks in each cleanup branch.
+- **Idle calculation reuse**: added a shared `getIdleMs()` helper and reused it in both cleanup logic and popup state generation to keep idle-time behavior consistent while reducing duplicated timestamp logic.
+- **Behavior preservation**: manual hard-age runs still use `browser.sessions.getTabValue()` for persisted open-time data, while automatic sweeps continue to rely on Firefox's `tab.lastAccessed` metadata for idle cleanup.
+
+---
+
 *Future entries should follow this format, incrementing the Internal Version by 1 for each new session.*
 
 
